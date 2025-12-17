@@ -1,38 +1,36 @@
-const fs = require('fs');
-const path = require('path');
-const os = require('os');
-const OpenAI = require('openai');
+const { GoogleGenerativeAI } = require("@google/generative-ai");
 require('dotenv').config();
 
-// Initialize OpenAI
-const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY, // Ensure this is set in your .env and Render
-});
+// Initialize Gemini
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+// Use Flash 1.5 because it's fast and cheap
+const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
 const transcribeAudio = async (audioBuffer) => {
     try {
-        // 1. Create a temporary file path
-        // OpenAI requires a file with an extension (e.g., .webm) to know how to decode it
-        const tempFilePath = path.join(os.tmpdir(), `input-${Date.now()}.webm`);
+        // Convert Buffer to Base64
+        const audioBase64 = audioBuffer.toString('base64');
 
-        // 2. Write buffer to the temp file
-        fs.writeFileSync(tempFilePath, audioBuffer);
+        // Prepare the "Part" for Gemini
+        const audioPart = {
+            inlineData: {
+                data: audioBase64,
+                mimeType: "audio/webm" // or "audio/mp3" depending on your frontend
+            },
+        };
 
-        // 3. Send to Whisper API
-        const transcription = await openai.audio.transcriptions.create({
-            file: fs.createReadStream(tempFilePath),
-            model: "whisper-1",
-            language: "en", // Optional: Start with 'en', remove if you want auto-detect
-        });
+        // Prompt specifically for transcription
+        const prompt = "Please transcribe the spoken English/Hinglish in this audio clearly. Do not add any other text.";
 
-        // 4. Clean up (Delete the temp file)
-        fs.unlinkSync(tempFilePath);
+        const result = await model.generateContent([prompt, audioPart]);
+        const response = await result.response;
+        const text = response.text();
 
-        return transcription.text;
+        return text;
 
     } catch (error) {
-        console.error("❌ OpenAI Transcription Error:", error);
-        return null; // Return null if it failed
+        console.error("❌ Gemini Transcription Error:", error);
+        return null;
     }
 };
 
