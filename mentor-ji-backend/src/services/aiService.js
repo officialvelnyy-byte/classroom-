@@ -59,12 +59,12 @@ const generateAIResponse = async (userText) => {
 // 3. SPEAKING (ElevenLabs - High Quality Hinglish)
 const generateAudio = async (text) => {
     try {
-        const VOICE_ID = "JBFqnCBsd6RMkjVDRZzb"; // 'George' - Good standard male voice
+       const VOICE_ID = "nPczCjzI2devNBz1zQrb"; // 'George' - Good standard male voice
         // Or use 'Sarah' (EXAVITQu4vr4xnSDxMaL) for female
         
         const response = await axios({
             method: 'post',
-            url: `https://api.elevenlabs.io/v1/text-to-speech/${nPczCjzI2devNBz1zQrb}`,
+            url: `https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}`,
             headers: {
                 'Accept': 'audio/mpeg',
                 'xi-api-key': process.env.ELEVENLABS_API_KEY,
