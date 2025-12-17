@@ -3,11 +3,11 @@ require('dotenv').config();
 
 const API_KEY = process.env.GEMINI_API_KEY;
 
-// 1. HEARING (Updated to 'gemini-1.5-flash-latest' to fix 404)
+// 1. HEARING (Use 'gemini-2.0-flash' - Fast & Available)
 const transcribeAudio = async (audioBuffer) => {
     try {
-        // Changed model to 'gemini-1.5-flash-latest' which is more stable
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${API_KEY}`;
+        // Using the model explicitly listed in your account
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${API_KEY}`;
 
         const payload = {
             contents: [{
@@ -24,7 +24,7 @@ const transcribeAudio = async (audioBuffer) => {
         };
 
         const response = await axios.post(url, payload);
-        // Safety check: sometimes the candidate array is empty if audio is silent
+        
         if (response.data.candidates && response.data.candidates[0].content) {
              return response.data.candidates[0].content.parts[0].text;
         }
@@ -36,10 +36,11 @@ const transcribeAudio = async (audioBuffer) => {
     }
 };
 
-// 2. THINKING (Updated to 'gemini-1.5-flash-latest')
+// 2. THINKING (Use 'gemini-2.0-flash' - Smart & Available)
 const generateAIResponse = async (userText) => {
     try {
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${API_KEY}`;
+        // Using the model explicitly listed in your account
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${API_KEY}`;
         
         const SYSTEM_PROMPT = `
         You are Mentor-JI, a friendly and wise AI tutor from India.
@@ -63,9 +64,10 @@ const generateAIResponse = async (userText) => {
     }
 };
 
-// 3. SPEAKING (Remains 'gemini-2.0-flash-exp' - Only one that speaks)
+// 3. SPEAKING (Use 'gemini-2.0-flash-exp' - Optimized for Audio Generation)
 const generateAudio = async (text) => {
     try {
+        // Keeping 'exp' for audio generation as it often has better voice synthesis features
         const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${API_KEY}`;
 
         const payload = {
