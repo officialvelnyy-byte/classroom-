@@ -3,10 +3,11 @@ require('dotenv').config();
 
 const API_KEY = process.env.GEMINI_API_KEY;
 
-// 1. HEARING (Use Gemini 1.5 Flash - High Stability)
+// 1. HEARING (Updated to 'gemini-1.5-flash-latest' to fix 404)
 const transcribeAudio = async (audioBuffer) => {
     try {
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${API_KEY}`;
+        // Changed model to 'gemini-1.5-flash-latest' which is more stable
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${API_KEY}`;
 
         const payload = {
             contents: [{
@@ -23,7 +24,11 @@ const transcribeAudio = async (audioBuffer) => {
         };
 
         const response = await axios.post(url, payload);
-        return response.data.candidates[0].content.parts[0].text;
+        // Safety check: sometimes the candidate array is empty if audio is silent
+        if (response.data.candidates && response.data.candidates[0].content) {
+             return response.data.candidates[0].content.parts[0].text;
+        }
+        return "";
 
     } catch (error) {
         console.error("❌ Transcription Error:", error.response?.data?.error?.message || error.message);
@@ -31,10 +36,10 @@ const transcribeAudio = async (audioBuffer) => {
     }
 };
 
-// 2. THINKING (Use Gemini 1.5 Flash - Fast & Smart)
+// 2. THINKING (Updated to 'gemini-1.5-flash-latest')
 const generateAIResponse = async (userText) => {
     try {
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${API_KEY}`;
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${API_KEY}`;
         
         const SYSTEM_PROMPT = `
         You are Mentor-JI, a friendly and wise AI tutor from India.
@@ -58,10 +63,9 @@ const generateAIResponse = async (userText) => {
     }
 };
 
-// 3. SPEAKING (Use Gemini 2.0 Flash Exp - The ONLY model that speaks)
+// 3. SPEAKING (Remains 'gemini-2.0-flash-exp' - Only one that speaks)
 const generateAudio = async (text) => {
     try {
-        // We MUST use 2.0-flash-exp for audio generation
         const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${API_KEY}`;
 
         const payload = {
@@ -83,11 +87,10 @@ const generateAudio = async (text) => {
         return Buffer.from(base64Audio, 'base64');
 
     } catch (error) {
-        // If we hit 429 (Too Many Requests), we just return null so the app doesn't crash
         if (error.response?.status === 429) {
             console.warn("⚠️ Quota Exceeded (429) - Sending text only.");
         } else {
-            console.error("❌ Audio Gen Error:", error.message);
+            console.error("❌ Audio Gen Error:", error.response?.data?.error?.message || error.message);
         }
         return null;
     }
