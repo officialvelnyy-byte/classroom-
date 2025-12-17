@@ -1,5 +1,5 @@
-// Import both AI functions
-const { transcribeAudio, generateAIResponse } = require('../services/aiService');
+// Import the full AI service suite
+const { transcribeAudio, generateAIResponse, generateAudio } = require('../services/aiService');
 
 // Store active buffers for each connected user
 const activeStreams = new Map();
@@ -16,7 +16,7 @@ const handleStream = (io, socket) => {
     socket.on('audio_chunk', (chunk) => {
         let buffer = activeStreams.get(socket.id);
         
-        // Robustness Check: Initialize if chunk arrives before 'start_stream'
+        // Robustness Check: Auto-initialize if 'start_stream' was missed
         if (!buffer) {
             buffer = [];
             activeStreams.set(socket.id, buffer);
@@ -26,14 +26,14 @@ const handleStream = (io, socket) => {
         buffer.push(binaryChunk);
     });
 
-    // 3. PROCESS: Hear (Transcribe) -> Think (LLM) -> Respond
+    // 3. PROCESS: HEAR -> THINK -> SPEAK
     socket.on('end_stream', async () => {
         const chunks = activeStreams.get(socket.id);
         if (!chunks || chunks.length === 0) return;
 
         const completeAudioBuffer = Buffer.concat(chunks);
         
-        // Cost Saving: Ignore tiny clips (< 1KB) like mic pops
+        // Cost Saving: Ignore tiny clips (< 1KB) like background noise
         if (completeAudioBuffer.length < 1000) { 
             console.log(`[Stream] Ignored short audio (${completeAudioBuffer.length} bytes)`);
             activeStreams.set(socket.id, []);
@@ -41,40 +41,46 @@ const handleStream = (io, socket) => {
         }
 
         try {
-            // STEP 1: HEAR (Transcribe Audio to Text)
+            // --- STEP 1: HEAR (Transcription) ---
             console.log(`[Processing] Transcribing ${completeAudioBuffer.length} bytes...`);
             const userText = await transcribeAudio(completeAudioBuffer);
 
             if (userText && userText.trim().length > 0) {
                 console.log(`🗣️  User ${socket.id}: "${userText}"`);
                 
-                // Send user transcription to UI immediately so they see it
+                // Immediately show the user what they said on the UI
                 socket.emit('transcription_update', { role: 'user', text: userText });
 
-                // STEP 2: THINK (Generate AI Response based on text)
+                // --- STEP 2: THINK (LLM Response) ---
                 console.log("🤔 AI is thinking...");
                 const aiText = await generateAIResponse(userText);
-                console.log(`🤖 AI: "${aiText}"`);
+                console.log(`🤖 AI Text: "${aiText}"`);
 
-                // STEP 3: RESPOND (Send AI Text back to UI)
+                // --- STEP 3: SPEAK (Text-to-Speech) ---
+                console.log("🔊 Generating AI Voice...");
+                const audioBuffer = await generateAudio(aiText);
+
+                // Send both the text and the audio (converted to Base64) back to UI
                 socket.emit('ai_response', {
                     text: aiText,
-                    audio: null // Ready for TTS implementation next!
+                    audio: audioBuffer ? audioBuffer.toString('base64') : null 
                 });
+
+                console.log(`✅ Sent Response & Audio (${audioBuffer?.length || 0} bytes)`);
 
             } else {
                 socket.emit('error', { message: "Could not understand audio" });
             }
         } catch (error) {
-            console.error("Processing Error:", error.message);
-            socket.emit('error', { message: "Something went wrong processing your request." });
+            console.error("Critical Processing Error:", error.message);
+            socket.emit('error', { message: "Something went wrong in the AI pipeline." });
         }
 
-        // Cleanup buffer for this session
+        // Cleanup buffer for the next exchange
         activeStreams.set(socket.id, []);
     });
 
-    // 4. CLEANUP: Remove user from memory when they leave
+    // 4. CLEANUP: Prevent memory leaks
     socket.on('disconnect', () => {
         activeStreams.delete(socket.id);
     });

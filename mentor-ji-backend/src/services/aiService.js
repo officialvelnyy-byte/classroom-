@@ -2,12 +2,13 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const Groq = require("groq-sdk");
+const { createClient } = require("@deepgram/sdk");
 require('dotenv').config();
 
-// Initialize Groq (Used for BOTH Hearing and Thinking)
+// Initialize SDKs
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+const deepgram = createClient(process.env.DEEPGRAM_API_KEY);
 
-// System Prompt
 const SYSTEM_PROMPT = `
 You are Mentor-JI, a friendly and wise AI tutor from India.
 - Your goal is to explain things simply.
@@ -16,7 +17,7 @@ You are Mentor-JI, a friendly and wise AI tutor from India.
 - Be encouraging and patient.
 `;
 
-// 1. HEARING (Speech-to-Text)
+// 1. HEARING (STT)
 const transcribeAudio = async (audioBuffer) => {
     try {
         const tempFilePath = path.join(os.tmpdir(), `input-${Date.now()}.wav`);
@@ -37,7 +38,7 @@ const transcribeAudio = async (audioBuffer) => {
     }
 };
 
-// 2. THINKING (Text-to-Text)
+// 2. THINKING (LLM)
 const generateAIResponse = async (userText) => {
     try {
         const completion = await groq.chat.completions.create({
@@ -45,20 +46,49 @@ const generateAIResponse = async (userText) => {
                 { role: "system", content: SYSTEM_PROMPT },
                 { role: "user", content: userText }
             ],
-            // UPDATE THIS LINE: Use the latest stable model
             model: "llama-3.3-70b-versatile", 
             temperature: 0.7,
             max_tokens: 300,
         });
-
         return completion.choices[0]?.message?.content || "I am speechless!";
-
     } catch (error) {
         console.error("❌ Groq Brain Error:", error);
-        return "I am having trouble thinking right now. Please check my connection.";
+        return "Thinking failed.";
     }
 };
 
+// 3. SPEAKING (TTS) - NEW!
+const generateAudio = async (text) => {
+    try {
+        const response = await deepgram.speak.request(
+            { text },
+            {
+                model: "aura-asteria-en", // "Asteria" is a friendly female voice. Try "aura-orion-en" for male.
+                encoding: "mp3",
+            }
+        );
 
+        const stream = await response.getStream();
+        if (stream) {
+            const buffer = await getBufferFromStream(stream);
+            return buffer;
+        } else {
+            console.error("❌ Error generating audio stream");
+            return null;
+        }
+    } catch (error) {
+        console.error("❌ TTS Error:", error);
+        return null;
+    }
+};
 
-module.exports = { transcribeAudio, generateAIResponse };
+// Helper to convert stream to buffer
+const getBufferFromStream = async (stream) => {
+    const chunks = [];
+    for await (const chunk of stream) {
+        chunks.push(chunk);
+    }
+    return Buffer.concat(chunks);
+};
+
+module.exports = { transcribeAudio, generateAIResponse, generateAudio };
