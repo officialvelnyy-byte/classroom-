@@ -3,11 +3,11 @@ require('dotenv').config();
 
 const API_KEY = process.env.GEMINI_API_KEY;
 
-// 1. HEARING (Use 'gemini-2.0-flash' - Fast & Available)
+// 1. HEARING (Use 'gemini-flash-latest' - High Quota/Stable)
 const transcribeAudio = async (audioBuffer) => {
     try {
-        // Using the model explicitly listed in your account
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${API_KEY}`;
+        // 'gemini-flash-latest' points to the best production Flash model (1.5)
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${API_KEY}`;
 
         const payload = {
             contents: [{
@@ -31,16 +31,37 @@ const transcribeAudio = async (audioBuffer) => {
         return "";
 
     } catch (error) {
+        // If 'latest' fails, try the Lite preview which appeared in your list
+        if (error.response?.status === 404) {
+            console.log("⚠️ Switching to Lite model...");
+            return transcribeAudioLite(audioBuffer);
+        }
         console.error("❌ Transcription Error:", error.response?.data?.error?.message || error.message);
         return null;
     }
 };
 
-// 2. THINKING (Use 'gemini-2.0-flash' - Smart & Available)
+// Fallback function using the Lite model from your list
+const transcribeAudioLite = async (audioBuffer) => {
+    try {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite-preview-02-05:generateContent?key=${API_KEY}`;
+        const payload = {
+            contents: [{
+                parts: [
+                    { text: "Transcribe this audio." },
+                    { inlineData: { mimeType: "audio/wav", data: audioBuffer.toString('base64') } }
+                ]
+            }]
+        };
+        const response = await axios.post(url, payload);
+        return response.data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    } catch (e) { return null; }
+};
+
+// 2. THINKING (Use 'gemini-flash-latest' - High Quota/Stable)
 const generateAIResponse = async (userText) => {
     try {
-        // Using the model explicitly listed in your account
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${API_KEY}`;
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${API_KEY}`;
         
         const SYSTEM_PROMPT = `
         You are Mentor-JI, a friendly and wise AI tutor from India.
@@ -64,10 +85,9 @@ const generateAIResponse = async (userText) => {
     }
 };
 
-// 3. SPEAKING (Use 'gemini-2.0-flash-exp' - Optimized for Audio Generation)
+// 3. SPEAKING (Use 'gemini-2.0-flash-exp' - Required for Audio)
 const generateAudio = async (text) => {
     try {
-        // Keeping 'exp' for audio generation as it often has better voice synthesis features
         const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${API_KEY}`;
 
         const payload = {
@@ -90,7 +110,7 @@ const generateAudio = async (text) => {
 
     } catch (error) {
         if (error.response?.status === 429) {
-            console.warn("⚠️ Quota Exceeded (429) - Sending text only.");
+            console.warn("⚠️ Voice Quota Exceeded (429) - Sending text only.");
         } else {
             console.error("❌ Audio Gen Error:", error.response?.data?.error?.message || error.message);
         }
