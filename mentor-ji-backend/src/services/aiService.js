@@ -1,35 +1,36 @@
-const { GoogleGenerativeAI } = require("@google/generative-ai");
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
+const Groq = require("groq-sdk");
 require('dotenv').config();
 
-// Initialize Gemini
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-// Use Flash 1.5 because it's fast and cheap
-const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-lite-preview-02-05" });
+// Initialize Groq
+const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
 const transcribeAudio = async (audioBuffer) => {
     try {
-        // Convert Buffer to Base64
-        const audioBase64 = audioBuffer.toString('base64');
+        // 1. Create a temporary file path
+        const tempFilePath = path.join(os.tmpdir(), `input-${Date.now()}.webm`);
+        
+        // 2. Write buffer to disk (Groq requires a file stream)
+        fs.writeFileSync(tempFilePath, audioBuffer);
 
-        // Prepare the "Part" for Gemini
-        const audioPart = {
-            inlineData: {
-                data: audioBase64,
-                mimeType: "audio/webm" // or "audio/mp3" depending on your frontend
-            },
-        };
+        // 3. Send to Groq (Whisper Large V3)
+        const transcription = await groq.audio.transcriptions.create({
+            file: fs.createReadStream(tempFilePath),
+            model: "whisper-large-v3", // The best open-source model available
+            response_format: "json",
+            language: "en", // Optional: Remove to auto-detect language
+            temperature: 0.0
+        });
 
-        // Prompt specifically for transcription
-        const prompt = "Please transcribe the spoken English/Hinglish in this audio clearly. Do not add any other text.";
+        // 4. Cleanup temp file
+        fs.unlinkSync(tempFilePath);
 
-        const result = await model.generateContent([prompt, audioPart]);
-        const response = await result.response;
-        const text = response.text();
-
-        return text;
+        return transcription.text;
 
     } catch (error) {
-        console.error("❌ Gemini Transcription Error:", error);
+        console.error("❌ Groq Transcription Error:", error);
         return null;
     }
 };
