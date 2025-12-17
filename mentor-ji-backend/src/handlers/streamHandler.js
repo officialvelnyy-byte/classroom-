@@ -1,53 +1,79 @@
-// Store active buffers for each connected user
-// Key: SocketId, Value: Buffer (Array of bytes)
+const { transcribeAudio } = require('../services/aiService');
+
+// Key: SocketId, Value: Array of Buffers
 const activeStreams = new Map();
 
 const handleStream = (io, socket) => {
     
-    // 1. Initialize buffer when user connects (or starts speaking)
+    // 1. Explicit Start
     socket.on('start_stream', () => {
         console.log(`[Stream] Started for user: ${socket.id}`);
         activeStreams.set(socket.id, []);
     });
 
-    // 2. Receive Audio Chunks
+    // 2. Continuous Audio Accumulation
     socket.on('audio_chunk', (chunk) => {
-        const buffer = activeStreams.get(socket.id);
+        let buffer = activeStreams.get(socket.id);
         
-        if (buffer) {
-            // Add the new chunk to our user's specific "bucket"
-            // Ensure chunk is a standard Buffer
-            const binaryChunk = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-            buffer.push(binaryChunk);
-            
-            // Optional: Log size occasionally (don't log every chunk, it's too noisy)
-            // console.log(`Received chunk: ${binaryChunk.length} bytes`);
-        } else {
-            // If we receive audio but no stream started, initialize it
-            activeStreams.set(socket.id, [Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)]);
+        // Robustness Check: Initialize if chunk arrives before 'start_stream'
+        if (!buffer) {
+            buffer = [];
+            activeStreams.set(socket.id, buffer);
         }
+
+        // Convert to Buffer if it arrives as ArrayBuffer or other binary type
+        const binaryChunk = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+        buffer.push(binaryChunk);
     });
 
-    // 3. Process Stream (Silence detected or user stopped)
+    // 3. Process and Transcribe
     socket.on('end_stream', async () => {
-        console.log(`[Stream] Ended for user: ${socket.id}`);
-        
         const chunks = activeStreams.get(socket.id);
+        
         if (!chunks || chunks.length === 0) return;
 
-        // Combine all little chunks into one big audio file (in memory)
         const completeAudioBuffer = Buffer.concat(chunks);
-        console.log(`[Processing] Total Audio Size: ${completeAudioBuffer.length} bytes`);
+        
+        // Cost Saving: Ignore clips < 1000 bytes (likely background noise or mic pops)
+        if (completeAudioBuffer.length < 1000) { 
+            console.log(`[Stream] Ignored short audio (${completeAudioBuffer.length} bytes)`);
+            activeStreams.set(socket.id, []);
+            return; 
+        }
 
-        // --- TODO: SEND TO AI HERE ---
-        // For now, we just echo back a text message to prove we got it.
-        socket.emit('ai_response', {
-            text: `I heard you! received ${completeAudioBuffer.length} bytes of audio.`,
-            audio: null // We will send back TTS audio later
-        });
+        console.log(`[Processing] Transcribing ${completeAudioBuffer.length} bytes for ${socket.id}...`);
 
-        // Clear the buffer for the next sentence
+        try {
+            const text = await transcribeAudio(completeAudioBuffer);
+
+            if (text && text.trim().length > 0) {
+                console.log(`🗣️  User ${socket.id}: "${text}"`);
+                
+                socket.emit('ai_response', {
+                    text: `You said: "${text}"`, 
+                    audio: null // Placeholder for future TTS
+                });
+            } else {
+                socket.emit('ai_response', {
+                    text: "Sorry, I didn't catch that.",
+                    audio: null
+                });
+            }
+        } catch (error) {
+            console.error("Transcription Error:", error.message);
+            socket.emit('ai_response', {
+                text: "Something went wrong while processing your voice.",
+                audio: null
+            });
+        }
+
+        // Always clear the buffer after processing
         activeStreams.set(socket.id, []);
+    });
+
+    // 4. Cleanup on Disconnect
+    socket.on('disconnect', () => {
+        activeStreams.delete(socket.id);
     });
 };
 
