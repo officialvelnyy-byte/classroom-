@@ -1,36 +1,37 @@
 const axios = require('axios');
+const { Readable } = require('stream');
+const Groq = require('groq-sdk');
 require('dotenv').config();
 
-const apiKey = process.env.GEMINI_API_KEY;
+const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
-// --- 1. HEAR (Transcription) ---
+// --- 1. HEAR (Transcription via Groq Whisper) ---
 const transcribeAudio = async (audioBuffer) => {
     try {
-        // Converting audio buffer to base64 for the Gemini API
-        const base64Audio = audioBuffer.toString('base64');
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+        // Convert Buffer to a Readable Stream for Groq SDK
+        const stream = Readable.from(audioBuffer);
+        
+        // Note: We provide a filename so the SDK recognizes the format (wav/webm)
+        const transcription = await groq.audio.transcriptions.create({
+            file: stream,
+            file_name: 'speech.wav', 
+            model: "whisper-large-v3-turbo",
+            response_format: "json",
+            language: "en",
+        });
 
-        const payload = {
-            contents: [{
-                parts: [
-                    { text: "Transcribe this audio accurately. If there is no speech, return an empty string." },
-                    { inlineData: { mimeType: "audio/wav", data: base64Audio } }
-                ]
-            }]
-        };
-
-        const response = await axios.post(url, payload);
-        return response.data.candidates[0].content.parts[0].text;
+        return transcription.text;
     } catch (error) {
-        console.error("❌ Transcription Error:", error.message);
+        console.error("❌ Groq Transcription Error:", error.message);
         return "";
     }
 };
 
-// --- 2. THINK (LLM Response) ---
+// --- 2. THINK (LLM Response via Gemini 2.0) ---
 const generateAIResponse = async (userText) => {
     try {
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${apiKey}`;
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${GEMINI_API_KEY}`;
         
         const payload = {
             contents: [{ parts: [{ text: userText }] }]
@@ -39,7 +40,7 @@ const generateAIResponse = async (userText) => {
         const response = await axios.post(url, payload);
         return response.data.candidates[0].content.parts[0].text;
     } catch (error) {
-        console.error("❌ LLM Error:", error.message);
+        console.error("❌ Gemini LLM Error:", error.message);
         return "I'm sorry, I'm having trouble thinking right now.";
     }
 };
@@ -47,20 +48,18 @@ const generateAIResponse = async (userText) => {
 // --- 3. SPEAK (Gemini 2.0 Native TTS) ---
 const generateAudio = async (text) => {
     try {
-        // Using Gemini 2.0 Flash for low-latency native audio generation
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${apiKey}`;
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${GEMINI_API_KEY}`;
 
         const payload = {
             contents: [{ 
                 parts: [{ text: "Please read this naturally: " + text }] 
             }],
             generationConfig: {
-                responseModalities: ["AUDIO"], // Native Multimodal Output
+                responseModalities: ["AUDIO"],
                 speechConfig: {
                     voiceConfig: {
                         prebuiltVoiceConfig: {
-                            // Options: "Puck", "Charon", "Kore", "Fenrir", "Aoede"
-                            voiceName: "Puck" 
+                            voiceName: "Puck" // Options: "Puck", "Charon", "Kore", "Fenrir", "Aoede"
                         }
                     }
                 }
@@ -71,10 +70,7 @@ const generateAudio = async (text) => {
             headers: { 'Content-Type': 'application/json' }
         });
 
-        // The multimodal response returns audio in the inlineData field
         const base64Audio = response.data.candidates[0].content.parts[0].inlineData.data;
-        
-        // Convert base64 string back to a Buffer for the socket handler
         return Buffer.from(base64Audio, 'base64');
 
     } catch (error) {
