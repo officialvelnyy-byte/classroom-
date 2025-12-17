@@ -1,90 +1,84 @@
-const fs = require('fs');
-const path = require('path');
-const os = require('os');
-const Groq = require("groq-sdk");
-const axios = require('axios'); // Use Axios for ElevenLabs
+const axios = require('axios');
 require('dotenv').config();
 
-// Initialize Groq
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+const apiKey = process.env.GEMINI_API_KEY;
 
-const SYSTEM_PROMPT = `
-You are Mentor-JI, a friendly and wise AI tutor from India.
-- Your goal is to explain things simply.
-- Keep your answers short and conversational (2-3 sentences max).
-- You can use Hinglish (Hindi + English).
-- Be encouraging and patient.
-`;
-
-// 1. HEARING (Groq/Whisper)
+// --- 1. HEAR (Transcription) ---
 const transcribeAudio = async (audioBuffer) => {
     try {
-        const tempFilePath = path.join(os.tmpdir(), `input-${Date.now()}.wav`);
-        fs.writeFileSync(tempFilePath, audioBuffer);
+        // Converting audio buffer to base64 for the Gemini API
+        const base64Audio = audioBuffer.toString('base64');
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
 
-        const transcription = await groq.audio.transcriptions.create({
-            file: fs.createReadStream(tempFilePath),
-            model: "whisper-large-v3",
-            response_format: "json",
-            language: "en",
-        });
+        const payload = {
+            contents: [{
+                parts: [
+                    { text: "Transcribe this audio accurately. If there is no speech, return an empty string." },
+                    { inlineData: { mimeType: "audio/wav", data: base64Audio } }
+                ]
+            }]
+        };
 
-        fs.unlinkSync(tempFilePath);
-        return transcription.text;
+        const response = await axios.post(url, payload);
+        return response.data.candidates[0].content.parts[0].text;
     } catch (error) {
-        console.error("❌ Groq Hearing Error:", error);
-        return null;
+        console.error("❌ Transcription Error:", error.message);
+        return "";
     }
 };
 
-// 2. THINKING (Groq/Llama 3)
+// --- 2. THINK (LLM Response) ---
 const generateAIResponse = async (userText) => {
     try {
-        const completion = await groq.chat.completions.create({
-            messages: [
-                { role: "system", content: SYSTEM_PROMPT },
-                { role: "user", content: userText }
-            ],
-            model: "llama-3.3-70b-versatile", 
-            temperature: 0.7,
-            max_tokens: 300,
-        });
-        return completion.choices[0]?.message?.content || "I am speechless!";
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${apiKey}`;
+        
+        const payload = {
+            contents: [{ parts: [{ text: userText }] }]
+        };
+
+        const response = await axios.post(url, payload);
+        return response.data.candidates[0].content.parts[0].text;
     } catch (error) {
-        console.error("❌ Groq Brain Error:", error);
-        return "Thinking failed.";
+        console.error("❌ LLM Error:", error.message);
+        return "I'm sorry, I'm having trouble thinking right now.";
     }
 };
 
-// 3. SPEAKING (ElevenLabs - High Quality Hinglish)
+// --- 3. SPEAK (Gemini 2.0 Native TTS) ---
 const generateAudio = async (text) => {
     try {
-       const VOICE_ID = "nPczCjzI2devNBz1zQrb"; // 'George' - Good standard male voice
-        // Or use 'Sarah' (EXAVITQu4vr4xnSDxMaL) for female
-        
-        const response = await axios({
-            method: 'post',
-            url: `https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}`,
-            headers: {
-                'Accept': 'audio/mpeg',
-                'xi-api-key': process.env.ELEVENLABS_API_KEY,
-                'Content-Type': 'application/json',
-            },
-            data: {
-                text: text,
-                model_id: "eleven_turbo_v2_5", // Fastest model for low latency
-                voice_settings: {
-                    stability: 0.5,
-                    similarity_boost: 0.5
+        // Using Gemini 2.0 Flash for low-latency native audio generation
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${apiKey}`;
+
+        const payload = {
+            contents: [{ 
+                parts: [{ text: "Please read this naturally: " + text }] 
+            }],
+            generationConfig: {
+                responseModalities: ["AUDIO"], // Native Multimodal Output
+                speechConfig: {
+                    voiceConfig: {
+                        prebuiltVoiceConfig: {
+                            // Options: "Puck", "Charon", "Kore", "Fenrir", "Aoede"
+                            voiceName: "Puck" 
+                        }
+                    }
                 }
-            },
-            responseType: 'arraybuffer' // Critical for handling binary audio
+            }
+        };
+
+        const response = await axios.post(url, payload, {
+            headers: { 'Content-Type': 'application/json' }
         });
 
-        return Buffer.from(response.data);
+        // The multimodal response returns audio in the inlineData field
+        const base64Audio = response.data.candidates[0].content.parts[0].inlineData.data;
+        
+        // Convert base64 string back to a Buffer for the socket handler
+        return Buffer.from(base64Audio, 'base64');
 
     } catch (error) {
-        console.error("❌ ElevenLabs TTS Error:", error.response?.data || error.message);
+        console.error("❌ Gemini TTS Error:", error.response?.data || error.message);
         return null;
     }
 };
