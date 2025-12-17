@@ -6,13 +6,15 @@ require('dotenv').config();
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
-// --- 1. HEAR (Transcription via Groq Whisper) ---
+/**
+ * 1. HEARING (Transcription)
+ * Uses Groq Whisper-large-v3-turbo for industry-leading speed.
+ */
 const transcribeAudio = async (audioBuffer) => {
     try {
         // Convert Buffer to a Readable Stream for Groq SDK
         const stream = Readable.from(audioBuffer);
         
-        // Note: We provide a filename so the SDK recognizes the format (wav/webm)
         const transcription = await groq.audio.transcriptions.create({
             file: stream,
             file_name: 'speech.wav', 
@@ -24,17 +26,40 @@ const transcribeAudio = async (audioBuffer) => {
         return transcription.text;
     } catch (error) {
         console.error("❌ Groq Transcription Error:", error.message);
-        return "";
+        
+        // OPTIONAL FALLBACK: Try Gemini 2.0 if Groq fails
+        try {
+            console.log("🔄 Attempting Gemini 2.0 Fallback Transcription...");
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${GEMINI_API_KEY}`;
+            const payload = {
+                contents: [{
+                    parts: [
+                        { text: "Transcribe this audio exactly. If there is no speech, return an empty string." },
+                        { inlineData: { mimeType: "audio/wav", data: audioBuffer.toString('base64') } }
+                    ]
+                }]
+            };
+            const response = await axios.post(url, payload);
+            return response.data.candidates[0].content.parts[0].text;
+        } catch (geminiError) {
+            console.error("❌ Gemini Fallback Error:", geminiError.message);
+            return null;
+        }
     }
 };
 
-// --- 2. THINK (LLM Response via Gemini 2.0) ---
+/**
+ * 2. THINKING (LLM Response)
+ * Uses Gemini 2.0 Flash for low-latency reasoning.
+ */
 const generateAIResponse = async (userText) => {
     try {
         const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${GEMINI_API_KEY}`;
         
         const payload = {
-            contents: [{ parts: [{ text: userText }] }]
+            contents: [{ parts: [{ text: userText }] }],
+            // Optional: Add system instructions here to keep responses concise for voice
+            system_instruction: { parts: [{ text: "You are a helpful voice assistant. Keep answers brief and conversational." }] }
         };
 
         const response = await axios.post(url, payload);
@@ -45,7 +70,10 @@ const generateAIResponse = async (userText) => {
     }
 };
 
-// --- 3. SPEAK (Gemini 2.0 Native TTS) ---
+/**
+ * 3. SPEAKING (Gemini 2.0 Native TTS)
+ * Converts text back to audio using native multimodal output.
+ */
 const generateAudio = async (text) => {
     try {
         const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${GEMINI_API_KEY}`;
