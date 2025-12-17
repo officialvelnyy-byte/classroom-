@@ -45,8 +45,8 @@ const generateAIResponse = async (userText) => {
                 { role: "system", content: SYSTEM_PROMPT },
                 { role: "user", content: userText }
             ],
-            // Use Llama 3 70B (High Intelligence) or Llama 3 8B (Super Fast)
-            model: "llama3-70b-8192", 
+            // UPDATE THIS LINE: Use the latest stable model
+            model: "llama-3.3-70b-versatile", 
             temperature: 0.7,
             max_tokens: 300,
         });
@@ -58,5 +58,7 @@ const generateAIResponse = async (userText) => {
         return "I am having trouble thinking right now. Please check my connection.";
     }
 };
+
+
 
 module.exports = { transcribeAudio, generateAIResponse };
