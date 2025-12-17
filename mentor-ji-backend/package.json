@@ -15,8 +15,10 @@
   "dependencies": {
     "@deepgram/sdk": "^4.11.2",
     "@google/generative-ai": "^0.24.1",
+    "axios": "^1.13.2",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
+    "elevenlabs-node": "^2.0.3",
     "express": "^5.2.1",
     "fs": "^0.0.1-security",
     "groq-sdk": "^0.37.0",

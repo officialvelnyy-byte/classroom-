@@ -2,22 +2,21 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const Groq = require("groq-sdk");
-const { createClient } = require("@deepgram/sdk");
+const axios = require('axios'); // Use Axios for ElevenLabs
 require('dotenv').config();
 
-// Initialize SDKs
+// Initialize Groq
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
-const deepgram = createClient(process.env.DEEPGRAM_API_KEY);
 
 const SYSTEM_PROMPT = `
 You are Mentor-JI, a friendly and wise AI tutor from India.
 - Your goal is to explain things simply.
 - Keep your answers short and conversational (2-3 sentences max).
-- You can use Hinglish (Hindi + English) if it feels natural.
+- You can use Hinglish (Hindi + English).
 - Be encouraging and patient.
 `;
 
-// 1. HEARING (STT)
+// 1. HEARING (Groq/Whisper)
 const transcribeAudio = async (audioBuffer) => {
     try {
         const tempFilePath = path.join(os.tmpdir(), `input-${Date.now()}.wav`);
@@ -38,7 +37,7 @@ const transcribeAudio = async (audioBuffer) => {
     }
 };
 
-// 2. THINKING (LLM)
+// 2. THINKING (Groq/Llama 3)
 const generateAIResponse = async (userText) => {
     try {
         const completion = await groq.chat.completions.create({
@@ -57,38 +56,37 @@ const generateAIResponse = async (userText) => {
     }
 };
 
-// 3. SPEAKING (TTS) - NEW!
+// 3. SPEAKING (ElevenLabs - High Quality Hinglish)
 const generateAudio = async (text) => {
     try {
-        const response = await deepgram.speak.request(
-            { text },
-            {
-                model: "aura-asteria-en", // "Asteria" is a friendly female voice. Try "aura-orion-en" for male.
-                encoding: "mp3",
-            }
-        );
+        const VOICE_ID = "JBFqnCBsd6RMkjVDRZzb"; // 'George' - Good standard male voice
+        // Or use 'Sarah' (EXAVITQu4vr4xnSDxMaL) for female
+        
+        const response = await axios({
+            method: 'post',
+            url: `https://api.elevenlabs.io/v1/text-to-speech/${nPczCjzI2devNBz1zQrb}`,
+            headers: {
+                'Accept': 'audio/mpeg',
+                'xi-api-key': process.env.ELEVENLABS_API_KEY,
+                'Content-Type': 'application/json',
+            },
+            data: {
+                text: text,
+                model_id: "eleven_turbo_v2_5", // Fastest model for low latency
+                voice_settings: {
+                    stability: 0.5,
+                    similarity_boost: 0.5
+                }
+            },
+            responseType: 'arraybuffer' // Critical for handling binary audio
+        });
 
-        const stream = await response.getStream();
-        if (stream) {
-            const buffer = await getBufferFromStream(stream);
-            return buffer;
-        } else {
-            console.error("❌ Error generating audio stream");
-            return null;
-        }
+        return Buffer.from(response.data);
+
     } catch (error) {
-        console.error("❌ TTS Error:", error);
+        console.error("❌ ElevenLabs TTS Error:", error.response?.data || error.message);
         return null;
     }
-};
-
-// Helper to convert stream to buffer
-const getBufferFromStream = async (stream) => {
-    const chunks = [];
-    for await (const chunk of stream) {
-        chunks.push(chunk);
-    }
-    return Buffer.concat(chunks);
 };
 
 module.exports = { transcribeAudio, generateAIResponse, generateAudio };
