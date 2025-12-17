@@ -1,108 +1,94 @@
 const axios = require('axios');
-const { Readable } = require('stream');
-const Groq = require('groq-sdk');
 require('dotenv').config();
 
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const API_KEY = process.env.GEMINI_API_KEY;
 
-/**
- * 1. HEARING (Transcription)
- * Uses Groq Whisper-large-v3-turbo for industry-leading speed.
- */
+// 1. HEARING (Use Gemini 1.5 Flash - High Stability)
 const transcribeAudio = async (audioBuffer) => {
     try {
-        // Convert Buffer to a Readable Stream for Groq SDK
-        const stream = Readable.from(audioBuffer);
-        
-        const transcription = await groq.audio.transcriptions.create({
-            file: stream,
-            file_name: 'speech.wav', 
-            model: "whisper-large-v3-turbo",
-            response_format: "json",
-            language: "en",
-        });
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${API_KEY}`;
 
-        return transcription.text;
-    } catch (error) {
-        console.error("❌ Groq Transcription Error:", error.message);
-        
-        // OPTIONAL FALLBACK: Try Gemini 2.0 if Groq fails
-        try {
-            console.log("🔄 Attempting Gemini 2.0 Fallback Transcription...");
-            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${GEMINI_API_KEY}`;
-            const payload = {
-                contents: [{
-                    parts: [
-                        { text: "Transcribe this audio exactly. If there is no speech, return an empty string." },
-                        { inlineData: { mimeType: "audio/wav", data: audioBuffer.toString('base64') } }
-                    ]
-                }]
-            };
-            const response = await axios.post(url, payload);
-            return response.data.candidates[0].content.parts[0].text;
-        } catch (geminiError) {
-            console.error("❌ Gemini Fallback Error:", geminiError.message);
-            return null;
-        }
-    }
-};
-
-/**
- * 2. THINKING (LLM Response)
- * Uses Gemini 2.0 Flash for low-latency reasoning.
- */
-const generateAIResponse = async (userText) => {
-    try {
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${GEMINI_API_KEY}`;
-        
         const payload = {
-            contents: [{ parts: [{ text: userText }] }],
-            // Optional: Add system instructions here to keep responses concise for voice
-            system_instruction: { parts: [{ text: "You are a helpful voice assistant. Keep answers brief and conversational." }] }
+            contents: [{
+                parts: [
+                    { text: "Transcribe this audio exactly. Output only the text." },
+                    {
+                        inlineData: {
+                            mimeType: "audio/wav",
+                            data: audioBuffer.toString('base64')
+                        }
+                    }
+                ]
+            }]
         };
 
         const response = await axios.post(url, payload);
         return response.data.candidates[0].content.parts[0].text;
+
     } catch (error) {
-        console.error("❌ Gemini LLM Error:", error.message);
-        return "I'm sorry, I'm having trouble thinking right now.";
+        console.error("❌ Transcription Error:", error.response?.data?.error?.message || error.message);
+        return null;
     }
 };
 
-/**
- * 3. SPEAKING (Gemini 2.0 Native TTS)
- * Converts text back to audio using native multimodal output.
- */
-const generateAudio = async (text) => {
+// 2. THINKING (Use Gemini 1.5 Flash - Fast & Smart)
+const generateAIResponse = async (userText) => {
     try {
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${GEMINI_API_KEY}`;
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${API_KEY}`;
+        
+        const SYSTEM_PROMPT = `
+        You are Mentor-JI, a friendly and wise AI tutor from India.
+        - Explain things simply in Hinglish (Hindi + English).
+        - Keep answers short (max 2 sentences).
+        - Be encouraging.
+        `;
 
         const payload = {
-            contents: [{ 
-                parts: [{ text: "Please read this naturally: " + text }] 
-            }],
+            contents: [{
+                parts: [{ text: SYSTEM_PROMPT + "\n\nUser: " + userText }]
+            }]
+        };
+
+        const response = await axios.post(url, payload);
+        return response.data.candidates[0].content.parts[0].text;
+
+    } catch (error) {
+        console.error("❌ AI Thinking Error:", error.message);
+        return "Thinking failed.";
+    }
+};
+
+// 3. SPEAKING (Use Gemini 2.0 Flash Exp - The ONLY model that speaks)
+const generateAudio = async (text) => {
+    try {
+        // We MUST use 2.0-flash-exp for audio generation
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${API_KEY}`;
+
+        const payload = {
+            contents: [{ parts: [{ text: "Read this naturally: " + text }] }],
             generationConfig: {
                 responseModalities: ["AUDIO"],
                 speechConfig: {
                     voiceConfig: {
                         prebuiltVoiceConfig: {
-                            voiceName: "Puck" // Options: "Puck", "Charon", "Kore", "Fenrir", "Aoede"
+                            voiceName: "Puck" 
                         }
                     }
                 }
             }
         };
 
-        const response = await axios.post(url, payload, {
-            headers: { 'Content-Type': 'application/json' }
-        });
-
+        const response = await axios.post(url, payload);
         const base64Audio = response.data.candidates[0].content.parts[0].inlineData.data;
         return Buffer.from(base64Audio, 'base64');
 
     } catch (error) {
-        console.error("❌ Gemini TTS Error:", error.response?.data || error.message);
+        // If we hit 429 (Too Many Requests), we just return null so the app doesn't crash
+        if (error.response?.status === 429) {
+            console.warn("⚠️ Quota Exceeded (429) - Sending text only.");
+        } else {
+            console.error("❌ Audio Gen Error:", error.message);
+        }
         return null;
     }
 };
