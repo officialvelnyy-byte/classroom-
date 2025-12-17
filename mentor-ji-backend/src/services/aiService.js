@@ -2,17 +2,12 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const Groq = require("groq-sdk");
-const { GoogleGenerativeAI } = require("@google/generative-ai");
 require('dotenv').config();
 
-// 1. Setup Groq for Hearing (Speech-to-Text)
+// Initialize Groq (Used for BOTH Hearing and Thinking)
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
-// 2. Setup Gemini for Thinking (Text-to-Text)
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-exp" });
-
-// System Prompt: This defines who the AI is
+// System Prompt
 const SYSTEM_PROMPT = `
 You are Mentor-JI, a friendly and wise AI tutor from India.
 - Your goal is to explain things simply.
@@ -21,6 +16,7 @@ You are Mentor-JI, a friendly and wise AI tutor from India.
 - Be encouraging and patient.
 `;
 
+// 1. HEARING (Speech-to-Text)
 const transcribeAudio = async (audioBuffer) => {
     try {
         const tempFilePath = path.join(os.tmpdir(), `input-${Date.now()}.wav`);
@@ -36,34 +32,30 @@ const transcribeAudio = async (audioBuffer) => {
         fs.unlinkSync(tempFilePath);
         return transcription.text;
     } catch (error) {
-        console.error("❌ Groq Error:", error);
+        console.error("❌ Groq Hearing Error:", error);
         return null;
     }
 };
 
+// 2. THINKING (Text-to-Text)
 const generateAIResponse = async (userText) => {
     try {
-        // Start a chat session (keeps history automatically if needed, but simple for now)
-        const chat = model.startChat({
-            history: [
-                {
-                    role: "user",
-                    parts: [{ text: SYSTEM_PROMPT }],
-                },
-                {
-                    role: "model",
-                    parts: [{ text: "Namaste! I am ready to help. What are we learning today?" }],
-                },
+        const completion = await groq.chat.completions.create({
+            messages: [
+                { role: "system", content: SYSTEM_PROMPT },
+                { role: "user", content: userText }
             ],
+            // Use Llama 3 70B (High Intelligence) or Llama 3 8B (Super Fast)
+            model: "llama3-70b-8192", 
+            temperature: 0.7,
+            max_tokens: 300,
         });
 
-        const result = await chat.sendMessage(userText);
-        const response = await result.response;
-        return response.text();
+        return completion.choices[0]?.message?.content || "I am speechless!";
 
     } catch (error) {
-        console.error("❌ Gemini Brain Error:", error);
-        return "I am having some trouble thinking right now. Can you ask again?";
+        console.error("❌ Groq Brain Error:", error);
+        return "I am having trouble thinking right now. Please check my connection.";
     }
 };
 
