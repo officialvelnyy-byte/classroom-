@@ -1,17 +1,18 @@
-const { transcribeAudio } = require('../services/aiService');
+// Import both AI functions
+const { transcribeAudio, generateAIResponse } = require('../services/aiService');
 
-// Key: SocketId, Value: Array of Buffers
+// Store active buffers for each connected user
 const activeStreams = new Map();
 
 const handleStream = (io, socket) => {
     
-    // 1. Explicit Start
+    // 1. INITIALIZE: Setup buffer when user starts speaking
     socket.on('start_stream', () => {
         console.log(`[Stream] Started for user: ${socket.id}`);
         activeStreams.set(socket.id, []);
     });
 
-    // 2. Continuous Audio Accumulation
+    // 2. ACCUMULATE: Receive and store audio chunks
     socket.on('audio_chunk', (chunk) => {
         let buffer = activeStreams.get(socket.id);
         
@@ -21,57 +22,59 @@ const handleStream = (io, socket) => {
             activeStreams.set(socket.id, buffer);
         }
 
-        // Convert to Buffer if it arrives as ArrayBuffer or other binary type
         const binaryChunk = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
         buffer.push(binaryChunk);
     });
 
-    // 3. Process and Transcribe
+    // 3. PROCESS: Hear (Transcribe) -> Think (LLM) -> Respond
     socket.on('end_stream', async () => {
         const chunks = activeStreams.get(socket.id);
-        
         if (!chunks || chunks.length === 0) return;
 
         const completeAudioBuffer = Buffer.concat(chunks);
         
-        // Cost Saving: Ignore clips < 1000 bytes (likely background noise or mic pops)
+        // Cost Saving: Ignore tiny clips (< 1KB) like mic pops
         if (completeAudioBuffer.length < 1000) { 
             console.log(`[Stream] Ignored short audio (${completeAudioBuffer.length} bytes)`);
             activeStreams.set(socket.id, []);
             return; 
         }
 
-        console.log(`[Processing] Transcribing ${completeAudioBuffer.length} bytes for ${socket.id}...`);
-
         try {
-            const text = await transcribeAudio(completeAudioBuffer);
+            // STEP 1: HEAR (Transcribe Audio to Text)
+            console.log(`[Processing] Transcribing ${completeAudioBuffer.length} bytes...`);
+            const userText = await transcribeAudio(completeAudioBuffer);
 
-            if (text && text.trim().length > 0) {
-                console.log(`🗣️  User ${socket.id}: "${text}"`);
+            if (userText && userText.trim().length > 0) {
+                console.log(`🗣️  User ${socket.id}: "${userText}"`);
                 
+                // Send user transcription to UI immediately so they see it
+                socket.emit('transcription_update', { role: 'user', text: userText });
+
+                // STEP 2: THINK (Generate AI Response based on text)
+                console.log("🤔 AI is thinking...");
+                const aiText = await generateAIResponse(userText);
+                console.log(`🤖 AI: "${aiText}"`);
+
+                // STEP 3: RESPOND (Send AI Text back to UI)
                 socket.emit('ai_response', {
-                    text: `You said: "${text}"`, 
-                    audio: null // Placeholder for future TTS
+                    text: aiText,
+                    audio: null // Ready for TTS implementation next!
                 });
+
             } else {
-                socket.emit('ai_response', {
-                    text: "Sorry, I didn't catch that.",
-                    audio: null
-                });
+                socket.emit('error', { message: "Could not understand audio" });
             }
         } catch (error) {
-            console.error("Transcription Error:", error.message);
-            socket.emit('ai_response', {
-                text: "Something went wrong while processing your voice.",
-                audio: null
-            });
+            console.error("Processing Error:", error.message);
+            socket.emit('error', { message: "Something went wrong processing your request." });
         }
 
-        // Always clear the buffer after processing
+        // Cleanup buffer for this session
         activeStreams.set(socket.id, []);
     });
 
-    // 4. Cleanup on Disconnect
+    // 4. CLEANUP: Remove user from memory when they leave
     socket.on('disconnect', () => {
         activeStreams.delete(socket.id);
     });
