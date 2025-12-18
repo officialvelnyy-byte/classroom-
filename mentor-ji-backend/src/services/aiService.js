@@ -1,10 +1,13 @@
 const axios = require('axios');
-const googleTTS = require('google-tts-api'); // <--- Import the backup voice
+const { MsEdgeTTS, OUTPUT_FORMAT } = require("msedge-tts");
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
 require('dotenv').config();
 
 const API_KEY = process.env.GEMINI_API_KEY;
 
-// 1. HEARING (Stable Model)
+// 1. HEARING (Gemini 1.5 Flash - High Quota)
 const transcribeAudio = async (audioBuffer) => {
     try {
         const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${API_KEY}`;
@@ -28,7 +31,7 @@ const transcribeAudio = async (audioBuffer) => {
     }
 };
 
-// 2. THINKING (Stable Model)
+// 2. THINKING (Gemini 1.5 Flash - Smart & Fast)
 const generateAIResponse = async (userText) => {
     try {
         const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${API_KEY}`;
@@ -54,45 +57,33 @@ const generateAIResponse = async (userText) => {
     }
 };
 
-// 3. SPEAKING (Dual Engine: Gemini High-End -> Fallback to Google Standard)
+// 3. SPEAKING (Microsoft Edge TTS - Free, Unlimited, Human-like)
 const generateAudio = async (text) => {
-    
-    // --- ATTEMPT 1: High Quality (Gemini 2.0) ---
     try {
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${API_KEY}`;
-        const payload = {
-            contents: [{ parts: [{ text: "Read this naturally: " + text }] }],
-            generationConfig: {
-                responseModalities: ["AUDIO"],
-                speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: "Puck" } } }
-            }
-        };
-
-        const response = await axios.post(url, payload);
-        const base64Audio = response.data.candidates[0].content.parts[0].inlineData.data;
-        return Buffer.from(base64Audio, 'base64');
+        const tts = new MsEdgeTTS();
+        
+        // "en-IN-NeerjaNeural" is a very high-quality Indian English female voice
+        // "en-IN-PrabhatNeural" is the male version. Pick your favorite!
+        await tts.setMetadata("en-IN-NeerjaNeural", OUTPUT_FORMAT.WEBM_24KHZ_16BIT_MONO_OPUS);
+        
+        // Create a temporary file path
+        const tempFilePath = path.join(os.tmpdir(), `temp_audio_${Date.now()}.webm`);
+        
+        // Generate audio to file
+        await tts.toFile(tempFilePath, text);
+        
+        // Read the file back into a buffer
+        const audioBuffer = fs.readFileSync(tempFilePath);
+        
+        // Clean up the temp file
+        fs.unlinkSync(tempFilePath);
+        
+        return audioBuffer;
 
     } catch (error) {
-        // If Quota Exceeded (429) or any other error, switch to BACKUP
-        console.warn(`⚠️ High-End Voice Failed (${error.response?.status || 'Error'}). Switching to Backup Voice...`);
-        return generateBackupAudio(text);
-    }
-};
-
-// --- BACKUP VOICE FUNCTION (Free, Unlimited) ---
-const generateBackupAudio = async (text) => {
-    try {
-        // generate Base64 string directly
-        const base64string = await googleTTS.getAudioBase64(text, {
-            lang: 'hi', // 'hi' for Hindi/Hinglish accent, 'en' for standard English
-            slow: false,
-            host: 'https://translate.google.com',
-        });
-        return Buffer.from(base64string, 'base64');
-    } catch (e) {
-        console.error("❌ Backup Audio Failed:", e.message);
+        console.error("❌ Edge TTS Error:", error.message);
         return null;
     }
-}
+};
 
 module.exports = { transcribeAudio, generateAIResponse, generateAudio };
